@@ -29,6 +29,9 @@
         .mic-btn:hover { background: #ff5252; transform: translateY(-2px); box-shadow: 0 5px 15px rgba(255,107,107,0.3); }
         .mic-btn.recording { background: #ff6b6b; animation: pulse 1s infinite; }
         @keyframes pulse { 0%, 100% { box-shadow: 0 0 0 0px rgba(255,107,107,0.7); } 50% { box-shadow: 0 0 0 10px rgba(255,107,107,0); } }
+        .speak-btn { background: #ff6b6b; color: white; cursor: pointer; transition: all 0.3s; min-width: 100px; }
+        .speak-btn:hover { background: #ff5252; transform: translateY(-2px); box-shadow: 0 5px 15px rgba(255,107,107,0.3); }
+        .speak-btn.listening { background: #ff6b6b; animation: pulse 1s infinite; }
         .header { padding: 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border-radius: 15px 15px 0 0; }
     </style>
 </head>
@@ -44,6 +47,7 @@
         <div class="input-area">
             <input type="text" id="userInput" placeholder="Type your message..." />
             <button id="sendBtn" onclick="sendMessage()">Send</button>
+            <button id="speakBtn" class="speak-btn" onclick="startListening()">🎙️ Speak</button>
         </div>
     </div>
 
@@ -154,6 +158,59 @@
                 utterance.pitch = 1;
                 window.speechSynthesis.speak(utterance);
             }
+        }
+
+        function startListening() {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SpeechRecognition) {
+                addMessage('System', 'Speech recognition is not supported in your browser', 'system');
+                return;
+            }
+
+            const recognition = new SpeechRecognition();
+            recognition.lang = 'en-US';
+            recognition.interimResults = true;
+            recognition.maxAlternatives = 1;
+
+            const speakBtn = document.getElementById('speakBtn');
+            speakBtn.classList.add('listening');
+            speakBtn.disabled = true;
+
+            recognition.onstart = () => {
+                speakBtn.textContent = '🎙️ Listening...';
+            };
+
+            recognition.onresult = (event) => {
+                let transcript = '';
+                for (let i = event.resultIndex; i < event.results.length; i++) {
+                    const transcriptSegment = event.results[i][0].transcript;
+                    transcript += transcriptSegment;
+                }
+                userInput.value = transcript;
+                if (event.results[event.results.length - 1].isFinal) {
+                    speakBtn.classList.remove('listening');
+                    speakBtn.disabled = false;
+                    speakBtn.textContent = '🎙️ Speak';
+                    if (transcript.trim()) {
+                        sendMessage();
+                    }
+                }
+            };
+
+            recognition.onerror = (event) => {
+                addMessage('System', `Speech recognition error: ${event.error}`, 'system');
+                speakBtn.classList.remove('listening');
+                speakBtn.disabled = false;
+                speakBtn.textContent = '🎙️ Speak';
+            };
+
+            recognition.onend = () => {
+                speakBtn.classList.remove('listening');
+                speakBtn.disabled = false;
+                speakBtn.textContent = '🎙️ Speak';
+            };
+
+            recognition.start();
         }
 
         window.addEventListener('load', () => {
