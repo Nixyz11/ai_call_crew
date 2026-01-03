@@ -1,11 +1,27 @@
-"""CrewAI Agents for medical call center"""
+"""CrewAI Agents for medical call center with Ollama"""
 
 from crewai import Agent, Task, Crew
 from crewai_tools import tool
+from langchain_ollama import OllamaLLM
 from typing import Optional
 import logging
+import os
 
 logger = logging.getLogger(__name__)
+
+# Initialize Ollama LLM
+ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+ollama_model = os.getenv("OLLAMA_MODEL", "mistral")
+
+logger.info(f"Initializing Ollama LLM with model: {ollama_model}")
+logger.info(f"Ollama Base URL: {ollama_base_url}")
+
+llm = OllamaLLM(
+    model=ollama_model,
+    base_url=ollama_base_url,
+    temperature=0.7,
+    top_p=0.9
+)
 
 
 # Tools for agents
@@ -25,10 +41,11 @@ def book_appointment(patient_name: str, doctor_id: str, date: str, time: str) ->
 def get_service_info(service_type: str) -> str:
     """Get information about medical services"""
     services = {
-        "consultation": "General consultation - 30 mins - $50",
-        "dental": "Dental checkup - 45 mins - $75",
+        "consultation": "General consultation - 30 mins - Free initial",
+        "dental": "Dental checkup - 45 mins - $50",
         "lab_tests": "Lab tests - 15 mins - $100",
-        "follow_up": "Follow-up visit - 20 mins - $30"
+        "follow_up": "Follow-up visit - 20 mins - $30",
+        "physical": "Physical examination - 30 mins - $60"
     }
     return services.get(service_type, "Service not found")
 
@@ -47,6 +64,7 @@ consultation_agent = Agent(
     processes and medical services. You listen carefully to patient symptoms and concerns, ask clarifying questions, 
     and recommend appropriate medical services and doctor specialties.""",
     tools=[check_doctor_availability, schedule_callback],
+    llm=llm,
     verbose=True,
     allow_delegation=False
 )
@@ -59,6 +77,7 @@ appointment_agent = Agent(
     patient scheduling. You confirm patient availability, check doctor schedules, and book appointments 
     with attention to detail. You always provide confirmation numbers and send reminders.""",
     tools=[check_doctor_availability, book_appointment],
+    llm=llm,
     verbose=True,
     allow_delegation=False
 )
@@ -71,6 +90,7 @@ service_info_agent = Agent(
     and availability. You explain services clearly to patients, answer questions about benefits and 
     contraindications, and help patients choose the right services for their needs.""",
     tools=[get_service_info],
+    llm=llm,
     verbose=True,
     allow_delegation=False
 )
@@ -87,11 +107,12 @@ def create_call_center_crew(call_data: dict) -> Crew:
         Crew object configured for the call type
     """
     issue_type = call_data.get("issue_type", "other")
+    patient_name = call_data.get("patient_name", "Patient")
     
     if issue_type == "consultation":
         tasks = [
             Task(
-                description=f"Handle consultation request for patient: {call_data.get('patient_name', 'Unknown')}",
+                description=f"Handle consultation request for patient: {patient_name}. Issue: {call_data.get('description', 'General consultation')}",
                 agent=consultation_agent,
                 expected_output="Consultation guidance and recommended next steps"
             )
@@ -100,9 +121,9 @@ def create_call_center_crew(call_data: dict) -> Crew:
     elif issue_type == "appointment":
         tasks = [
             Task(
-                description=f"Book appointment for patient: {call_data.get('patient_name', 'Unknown')} on {call_data.get('preferred_date', 'available date')}",
+                description=f"Book appointment for patient: {patient_name} on {call_data.get('preferred_date', 'available date')}",
                 agent=appointment_agent,
-                expected_output="Appointment confirmation with details"
+                expected_output="Appointment confirmation with details and confirmation number"
             )
         ]
         agents = [appointment_agent]
@@ -119,7 +140,7 @@ def create_call_center_crew(call_data: dict) -> Crew:
         # Default: use consultation agent
         tasks = [
             Task(
-                description=f"Handle general inquiry for patient: {call_data.get('patient_name', 'Unknown')}",
+                description=f"Handle general inquiry for patient: {patient_name}. Description: {call_data.get('description', 'Not specified')}",
                 agent=consultation_agent,
                 expected_output="Guidance and recommended actions"
             )
