@@ -125,7 +125,7 @@ async def process_call(call_request: CallRequest) -> CallResponse:
             next_steps=["Wait for additional guidance", "Feel free to ask more questions"]
         )
                 
-        return response
+                return response
         except Exception as e:
         logger.error(f"Error processing call: {str(e)}")
         raise HTTPException(status_code=500, detail="Error processing call")
