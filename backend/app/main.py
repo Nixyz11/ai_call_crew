@@ -57,6 +57,43 @@ async def health_check():
     """Health check endpoint"""
     return {"status": "healthy"}
 
+def generate_response(patient_name: str, description: str, issue_type: str) -> str:
+    """
+    Generate an intelligent response based on patient's input.
+    Creates contextual and empathetic responses using the patient's description.
+    """
+    # Base response template that acknowledges the patient
+    response = f"Thank you {patient_name or 'there'}. I understand you're experiencing issues with your {issue_type}. "
+    
+    # Keyword-based response generation for context-aware replies
+    description_lower = description.lower() if description else ""
+    
+    # Medical condition detection and empathetic response
+    if "headache" in description_lower or "head pain" in description_lower:
+        response += "Headaches can be quite uncomfortable. I can help you explore potential causes and solutions. Can you tell me if it's a throbbing pain, pressure, or sharp pain? Also, how long have you been experiencing this?"
+    
+    elif "stomach" in description_lower or "abdominal" in description_lower or "digestive" in description_lower:
+        response += "Stomach and digestive issues can be concerning. I'm here to help. Can you describe the type of discomfort - is it cramping, nausea, bloating, or pain? When did it start?"
+    
+    elif "appointment" in description_lower or "available" in description_lower or "schedule" in description_lower:
+        response += "I can help you check available appointment times. We have various services available at different times. What type of service are you interested in - a general consultation, specialist visit, or diagnostic procedure?"
+    
+    elif "service" in description_lower or "what do you offer" in description_lower:
+        response += "We offer comprehensive medical services including consultations, diagnostic procedures, and specialist appointments. What specific service interests you? Would you like information about our cardiology, gastroenterology services, or ultrasound diagnostics?"
+    
+    elif "pain" in description_lower or "ache" in description_lower:
+        response += "Pain and discomfort should be evaluated properly. Can you tell me where the pain is located and how long you've had it? This will help me guide you to the right service."
+    
+    elif "symptoms" in description_lower or "sick" in description_lower or "ill" in description_lower:
+        response += "I'm sorry to hear you're not feeling well. Can you describe your main symptoms? This will help me better understand how to assist you."
+    
+    else:
+        # Generic helpful response if no keywords match
+        response += f"I'm here to help with your {issue_type} concerns. Can you provide more details about what you're experiencing so I can better assist you?"
+    
+    response += " How can I help you further?"
+    return response
+
 @app.post("/api/call/process")
 async def process_call(call_request: CallRequest) -> CallResponse:
     """
@@ -74,11 +111,19 @@ async def process_call(call_request: CallRequest) -> CallResponse:
         # TODO: Integrate with CrewAI agents
         # Process call based on issue type
         
+# Generate intelligent response based on user input
+        response_text = generate_response(
+            patient_name=call_request.patient_name,
+            description=call_request.description,
+            issue_type=call_request.issue_type
+        )
+        
         response = CallResponse(
-            call_id=f"CALL-{hash(call_request.patient_name)}" ,
+            call_id=f"CALL-{hash(call_request.patient_name)}",
             status="processed",
-            assistant_response=f"Thank you {call_request.patient_name}. I will assist you with your {call_request.issue_type}.",
-            next_steps=["Wait for agent response", "Provide additional info if needed"]
+            assistant_response=response_text,
+            next_steps=["Wait for additional guidance", "Feel free to ask more questions"]
+        )
         )
         
         return response
