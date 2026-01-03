@@ -16,11 +16,10 @@ llama-index
 # Database & Storage
 pydantic-settings
 psycopg2-binary
-sqlalchemy
+sqlalchemy>=2.0
 
 # Audio Processing
 pydub
-speech-recognition
 python-dotenv
 
 # Utilities
