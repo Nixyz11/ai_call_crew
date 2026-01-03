@@ -1,8 +1,8 @@
-"""FastAPI application for AI Call Center Assistant"""
+"""FastAPI application for AI Call Center Assistant with conversation memory"""
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Dict
 import logging
 
 logging.basicConfig(level=logging.INFO)
@@ -22,6 +22,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+conversation_history: Dict[str, List[Dict[str, str]]] = {}
+
 class CallRequest(BaseModel):
     patient_name: str
     phone_number: str
@@ -35,27 +37,66 @@ class CallResponse(BaseModel):
     assistant_response: str
     next_steps: Optional[List[str]] = None
 
-def generate_response(patient_name: str, description: str, issue_type: str) -> str:
-    response = f"Thank you {patient_name or 'there'}. I understand you're experiencing issues with your {issue_type}. "
+def extract_specialty(description: str) -> str:
     description_lower = description.lower() if description else ""
     
-    if "headache" in description_lower or "head pain" in description_lower:
-        response += "Headaches can be quite uncomfortable. I can help you explore potential causes and solutions. Can you tell me if it's a throbbing pain, pressure, or sharp pain? Also, how long have you been experiencing this?"
-    elif "stomach" in description_lower or "abdominal" in description_lower or "digestive" in description_lower:
-        response += "Stomach and digestive issues can be concerning. I'm here to help. Can you describe the type of discomfort - is it cramping, nausea, bloating, or pain? When did it start?"
-    elif "appointment" in description_lower or "available" in description_lower or "schedule" in description_lower:
-        response += "I can help you check available appointment times. We have various services available at different times. What type of service are you interested in - a general consultation, specialist visit, or diagnostic procedure?"
-    elif "service" in description_lower or "what do you offer" in description_lower:
-        response += "We offer comprehensive medical services including consultations, diagnostic procedures, and specialist appointments. What specific service interests you? Would you like information about our cardiology, gastroenterology services, or ultrasound diagnostics?"
-    elif "pain" in description_lower or "ache" in description_lower:
-        response += "Pain and discomfort should be evaluated properly. Can you tell me where the pain is located and how long you've had it? This will help me guide you to the right service."
-    elif "symptoms" in description_lower or "sick" in description_lower or "ill" in description_lower:
-        response += "I'm sorry to hear you're not feeling well. Can you describe your main symptoms? This will help me better understand how to assist you."
-    else:
-        response += f"I'm here to help with your {issue_type} concerns. Can you provide more details about what you're experiencing so I can better assist you?"
+    specialties = {
+        "cardiology": ["heart", "cardiac", "cardiologist", "chest pain", "heart disease"],
+        "gastroenterology": ["stomach", "digestive", "abdominal", "gut", "gastro"],
+        "neurology": ["headache", "migraine", "brain", "neurologist", "headaches"],
+        "orthopedics": ["bone", "joint", "fracture", "arthritis", "knee", "back pain"],
+        "general": ["appointment", "consultation", "checkup", "visit"]
+    }
     
-    response += " How can I help you further?"
-    return response
+    for specialty, keywords in specialties.items():
+        if any(keyword in description_lower for keyword in keywords):
+            return specialty
+    return "general"
+
+def get_conversation_context(session_id: str) -> str:
+    history = conversation_history.get(session_id, [])
+    if len(history) <= 1:
+        return "(first message in conversation)"
+    context = "Previous messages in this conversation:\n"
+    for msg in history[-4:-1]:  # Last 3 messages
+        context += f"- Patient: {msg.get('user', '')}\n- Agent: {msg.get('agent', '')}\n"
+    return context
+
+def generate_smart_response(patient_name: str, description: str, specialty: str, session_id: str) -> str:
+    context = get_conversation_context(session_id)
+    history = conversation_history.get(session_id, [])
+    
+    patient_name = patient_name.strip() if patient_name else "there"
+    
+    if specialty == "cardiology":
+        if "appointment" in description.lower() or "book" in description.lower():
+            return f"Thank you {patient_name}. I understand you want to book a cardiology appointment. We have experienced cardiologists available. Would you prefer a morning, afternoon, or evening appointment? Also, do you have any specific dates in mind?"
+        else:
+            return f"Thank you {patient_name}. I understand you're experiencing heart-related issues. This requires a cardiologist's evaluation. I can help you schedule an appointment with our cardiology specialist. When would be the best time for you to visit?"
+    
+    elif specialty == "gastroenterology":
+        if "appointment" in description.lower() or "book" in description.lower():
+            return f"Thank you {patient_name}. I'll help you book an appointment with our gastroenterologist. We have available slots next week. Would you prefer morning or afternoon? Any particular days that work best for you?"
+        else:
+            return f"Thank you {patient_name}. Digestive issues require proper evaluation by a specialist. I recommend scheduling a consultation with our gastroenterologist. They can provide a comprehensive assessment and treatment plan. Would you like to book an appointment?"
+    
+    elif specialty == "neurology":
+        if "appointment" in description.lower() or "book" in description.lower():
+            return f"Thank you {patient_name}. Our neurologists have several availability slots. Would you prefer this week or next week? What time of day works best for you?"
+        else:
+            return f"Thank you {patient_name}. Neurological concerns should be evaluated by a specialist. I can connect you with our experienced neurologist. They can help diagnose and treat your condition. Shall we schedule an appointment?"
+    
+    elif specialty == "orthopedics":
+        if "appointment" in description.lower() or "book" in description.lower():
+            return f"Thank you {patient_name}. Our orthopedic specialists are available for appointments. We have slots available Tuesday through Saturday. Which day suits you best?"
+        else:
+            return f"Thank you {patient_name}. Bone and joint issues require professional orthopedic care. I can help you schedule an evaluation with our orthopedic specialist. They'll assess your condition and recommend treatment. Would you like to proceed with booking?"
+    
+    else:
+        if len(history) > 1:
+            return f"Thank you {patient_name}. Based on what you've shared, I recommend booking a general consultation. Our doctors can assess your condition and refer you to a specialist if needed. Are you interested in scheduling an appointment this week?"
+        else:
+            return f"Hello {patient_name}! Thank you for contacting us. I'm here to help you with your medical needs. Could you tell me more about what brings you in today?"
 
 @app.get("/")
 async def root():
@@ -72,54 +113,50 @@ async def health_check():
 @app.post("/api/call/process")
 async def process_call(call_request: CallRequest) -> CallResponse:
     try:
+        session_id = call_request.phone_number
         logger.info(f"Processing call from {call_request.patient_name}")
-        response_text = generate_response(
+        
+        specialty = extract_specialty(call_request.description or "")
+        response_text = generate_smart_response(
             patient_name=call_request.patient_name,
-            description=call_request.description,
-            issue_type=call_request.issue_type
+            description=call_request.description or "",
+            specialty=specialty,
+            session_id=session_id
         )
+        
+        if session_id not in conversation_history:
+            conversation_history[session_id] = []
+        
+        conversation_history[session_id].append({
+            "user": call_request.description,
+            "agent": response_text
+        })
+        
+        next_steps = []
+        if "appointment" in response_text.lower():
+            next_steps = ["Choose preferred appointment time", "Confirm specialist preference", "Receive appointment confirmation"]
+        else:
+            next_steps = ["Provide more details if needed", "Proceed to book appointment", "Receive appointment confirmation"]
+        
         response = CallResponse(
-            call_id=f"CALL-{hash(call_request.patient_name)}",
+            call_id=f"CALL-{hash(session_id)}",
             status="processed",
             assistant_response=response_text,
-            next_steps=["Wait for additional guidance", "Feel free to ask more questions"]
+            next_steps=next_steps
         )
         return response
     except Exception as e:
         logger.error(f"Error processing call: {str(e)}")
         raise HTTPException(status_code=500, detail="Error processing call")
 
-@app.post("/api/consultation")
-async def handle_consultation(call_request: CallRequest) -> CallResponse:
-    try:
-        return CallResponse(
-            call_id=f"CONSULT-{hash(call_request.patient_name)}",
-            status="consultation_initiated",
-            assistant_response="Doctor consultation has been scheduled.",
-            next_steps=["Confirm appointment details", "Receive confirmation SMS"]
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail="Error handling consultation")
-
-@app.post("/api/appointment")
-async def book_appointment(call_request: CallRequest) -> CallResponse:
-    try:
-        return CallResponse(
-            call_id=f"APT-{hash(call_request.patient_name)}",
-            status="appointment_booked",
-            assistant_response=f"Your appointment has been scheduled for {call_request.preferred_date}.",
-            next_steps=["Save confirmation number", "Receive appointment reminder"]
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail="Error booking appointment")
-
 @app.get("/api/services")
 async def get_services():
     services = [
-        {"id": "1", "name": "General Consultation", "duration": "30 mins"},
-        {"id": "2", "name": "Dental Checkup", "duration": "45 mins"},
-        {"id": "3", "name": "Lab Tests", "duration": "15 mins"},
-        {"id": "4", "name": "Follow-up Visit", "duration": "20 mins"},
+        {"id": "1", "name": "Cardiology", "duration": "45 mins"},
+        {"id": "2", "name": "Gastroenterology", "duration": "45 mins"},
+        {"id": "3", "name": "Neurology", "duration": "45 mins"},
+        {"id": "4", "name": "Orthopedics", "duration": "45 mins"},
+        {"id": "5", "name": "General Consultation", "duration": "30 mins"},
     ]
     return {"services": services}
 
